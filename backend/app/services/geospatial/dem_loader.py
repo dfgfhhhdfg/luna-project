@@ -15,8 +15,9 @@ Elevation Datum:
 """
 
 import os
+import math
 from pathlib import Path
-from typing import Tuple, Dict, Any, Optional, Union
+from typing import Tuple, Dict, Any, Optional, Union, Sequence
 from dataclasses import dataclass, asdict
 import numpy as np
 
@@ -117,10 +118,23 @@ class DemRaster:
             return float("nan")
         return val
 
-    def get_elevation_at_projected(self, x_m: float, y_m: float) -> float:
+    def get_elevation_at_projected(
+        self,
+        x_m: float,
+        y_m: float,
+        method: str = "bilinear"
+    ) -> float:
         """
         Query elevation by planar projected coordinates (X Easting, Y Northing in meters).
-        Uses nearest-neighbor or bilinear lookup from the raster bounds.
+        
+        Args:
+            x_m: Projected Easting in meters.
+            y_m: Projected Northing in meters.
+            method: 'bilinear' (default, continuous 4-point surface interpolation) or
+                    'nearest' (discrete pixel center lookup).
+                    
+        Returns:
+            Elevation in meters, or float('nan') if out of bounds or if any required neighbor is nodata.
         """
         left, bottom, right, top = self.metadata.bounds_projected
         if not (left <= x_m <= right and bottom <= y_m <= top):
@@ -128,16 +142,247 @@ class DemRaster:
 
         w = self.metadata.width_pixels
         h = self.metadata.height_pixels
-        px_x = self.metadata.pixel_size_x_m
-        px_y = self.metadata.pixel_size_y_m
 
-        col = int((x_m - left) / px_x)
-        row = int((top - y_m) / px_y)
+        # Convert projected coordinate to continuous pixel coordinates (u column, v row)
+        if self.transform is not None and HAS_RASTERIO:
+            try:
+                inv_t = ~self.transform
+                u = inv_t.a * x_m + inv_t.b * y_m + inv_t.c
+                v = inv_t.d * x_m + inv_t.e * y_m + inv_t.f
+            except Exception:
+                u = (x_m - left) / self.metadata.pixel_size_x_m
+                v = (top - y_m) / self.metadata.pixel_size_y_m
+        else:
+            u = (x_m - left) / self.metadata.pixel_size_x_m
+            v = (top - y_m) / self.metadata.pixel_size_y_m
 
-        col = min(max(0, col), w - 1)
-        row = min(max(0, row), h - 1)
+        if method == "nearest":
+            col = int(math.floor(u))
+            row = int(math.floor(v))
+            col = min(max(0, col), w - 1)
+            row = min(max(0, row), h - 1)
+            return self.get_elevation_at_pixel(col, row)
 
-        return self.get_elevation_at_pixel(col, row)
+        elif method == "bilinear":
+            # Pixel center is at (c + 0.5, r + 0.5)
+            u_c = u - 0.5
+            v_c = v - 0.5
+
+            c0 = int(math.floor(u_c))
+            r0 = int(math.floor(v_c))
+            c1 = c0 + 1
+            r1 = r0 + 1
+
+            # Strict boundary policy: all 4 neighbors must be inside raster bounds
+            if c0 < 0 or c1 >= w or r0 < 0 or r1 >= h:
+                return float("nan")
+
+            z00 = self.get_elevation_at_pixel(c0, r0)
+            z10 = self.get_elevation_at_pixel(c1, r0)
+            z01 = self.get_elevation_at_pixel(c0, r1)
+            z11 = self.get_elevation_at_pixel(c1, r1)
+
+            # Strict nodata policy: if ANY corner is nodata/NaN, return NaN (no silent substitution)
+            if math.isnan(z00) or math.isnan(z10) or math.isnan(z01) or math.isnan(z11):
+                return float("nan")
+
+            alpha = u_c - c0
+            beta = v_c - r0
+
+            z = (
+                (1.0 - alpha) * (1.0 - beta) * z00 +
+                alpha * (1.0 - beta) * z10 +
+                (1.0 - alpha) * beta * z01 +
+                alpha * beta * z11
+            )
+            return float(z)
+
+        else:
+            raise ValueError(f"Unsupported interpolation method '{method}'. Supported: 'bilinear', 'nearest'")
+
+    def calculate_slope(self) -> np.ndarray:
+        """Calculate slope array in degrees for the loaded DEM."""
+        from app.services.geospatial.terrain_analysis import calculate_slope
+        return calculate_slope(self)
+
+    def calculate_roughness(self, window_size: int = 5, metric: str = "std") -> np.ndarray:
+        """Calculate terrain roughness array in meters (std dev or relief)."""
+        from app.services.geospatial.terrain_analysis import calculate_roughness
+        return calculate_roughness(self, window_size=window_size, metric=metric)
+
+    def calculate_elevation_statistics(self) -> Dict[str, Any]:
+        """Calculate elevation summary statistics across the raster."""
+        from app.services.geospatial.terrain_analysis import calculate_elevation_statistics
+        return calculate_elevation_statistics(self.elevation, nodata_value=self.metadata.nodata_value)
+
+    def calculate_terrain_profile(
+        self,
+        start_coord: Tuple[float, float],
+        end_coord: Tuple[float, float],
+        sample_step_m: float = 100.0,
+        max_gap_allowed_m: float = 500.0,
+        interpolation_method: str = "bilinear"
+    ) -> Dict[str, Any]:
+        """Extract continuous elevation profile transect between two projected coordinates."""
+        from app.services.geospatial.terrain_analysis import calculate_terrain_profile
+        return calculate_terrain_profile(
+            self,
+            start_coord,
+            end_coord,
+            sample_step_m,
+            max_gap_allowed_m,
+            interpolation_method=interpolation_method
+        )
+
+    def assess_landing_area(
+        self,
+        center_projected: Tuple[float, float],
+        radius_m: float = 1000.0,
+        slope_thresholds: Sequence[float] = (5.0, 10.0, 12.0, 15.0),
+        roughness_window_size: int = 5
+    ) -> Dict[str, Any]:
+        """Perform comprehensive landing site topographic assessment."""
+        from app.services.geospatial.terrain_analysis import assess_landing_area
+        return assess_landing_area(self, center_projected, radius_m, slope_thresholds, roughness_window_size)
+
+    def sample_terrain_ray(
+        self,
+        observer_coord: Optional[Tuple[float, float]] = None,
+        azimuth_deg: float = 0.0,
+        max_distance_m: float = 30000.0,
+        radial_step_m: float = 100.0,
+        observer_height_m: float = 2.0,
+        observer_lat: Optional[float] = None,
+        observer_lon: Optional[float] = None,
+        observer_x_m: Optional[float] = None,
+        observer_y_m: Optional[float] = None,
+        interpolation_method: str = "bilinear",
+        mode: str = "auto"
+    ) -> Dict[str, Any]:
+        """Sample a radial terrain ray transect with lunar curvature correction."""
+        from app.services.geospatial.horizon_service import sample_terrain_ray
+        return sample_terrain_ray(
+            self,
+            observer_coord=observer_coord,
+            azimuth_deg=azimuth_deg,
+            max_distance_m=max_distance_m,
+            radial_step_m=radial_step_m,
+            observer_height_m=observer_height_m,
+            observer_lat=observer_lat,
+            observer_lon=observer_lon,
+            observer_x_m=observer_x_m,
+            observer_y_m=observer_y_m,
+            interpolation_method=interpolation_method,
+            mode=mode
+        )
+
+    def check_line_of_sight(
+        self,
+        target_azimuth_deg: float,
+        target_elevation_deg: float,
+        observer_coord: Optional[Tuple[float, float]] = None,
+        max_distance_m: float = 60000.0,
+        radial_step_m: float = 100.0,
+        observer_height_m: float = 2.0,
+        observer_lat: Optional[float] = None,
+        observer_lon: Optional[float] = None,
+        observer_x_m: Optional[float] = None,
+        observer_y_m: Optional[float] = None,
+        interpolation_method: str = "bilinear",
+        mode: str = "auto"
+    ) -> Dict[str, Any]:
+        """Evaluate line-of-sight obstruction for a target body with tri-state status."""
+        from app.services.geospatial.horizon_service import check_line_of_sight
+        return check_line_of_sight(
+            self,
+            target_azimuth_deg=target_azimuth_deg,
+            target_elevation_deg=target_elevation_deg,
+            observer_coord=observer_coord,
+            max_distance_m=max_distance_m,
+            radial_step_m=radial_step_m,
+            observer_height_m=observer_height_m,
+            observer_lat=observer_lat,
+            observer_lon=observer_lon,
+            observer_x_m=observer_x_m,
+            observer_y_m=observer_y_m,
+            interpolation_method=interpolation_method,
+            mode=mode
+        )
+
+    def calculate_horizon_profile(
+        self,
+        observer_coord: Optional[Tuple[float, float]] = None,
+        max_distance_m: float = 30000.0,
+        azimuth_step_deg: float = 1.0,
+        radial_step_m: float = 100.0,
+        observer_height_m: float = 2.0,
+        observer_lat: Optional[float] = None,
+        observer_lon: Optional[float] = None,
+        observer_x_m: Optional[float] = None,
+        observer_y_m: Optional[float] = None,
+        interpolation_method: str = "bilinear",
+        mode: str = "auto"
+    ) -> Dict[str, Any]:
+        """Calculate 360-degree local terrain horizon elevation profile."""
+        from app.services.geospatial.horizon_service import calculate_horizon_profile
+        return calculate_horizon_profile(
+            self,
+            observer_coord=observer_coord,
+            max_distance_m=max_distance_m,
+            azimuth_step_deg=azimuth_step_deg,
+            radial_step_m=radial_step_m,
+            observer_height_m=observer_height_m,
+            observer_lat=observer_lat,
+            observer_lon=observer_lon,
+            observer_x_m=observer_x_m,
+            observer_y_m=observer_y_m,
+            interpolation_method=interpolation_method,
+            mode=mode
+        )
+
+    def calculate_cliff_buffer_distance(
+        self,
+        center_projected: Tuple[float, float],
+        cliff_slope_threshold_deg: float = 20.0,
+        max_search_radius_m: float = 2000.0
+    ) -> Dict[str, Any]:
+        """Extract distance from candidate landing center to nearest terrain slope >= 20°."""
+        from app.services.geospatial.terrain_analysis import calculate_cliff_buffer_distance
+        return calculate_cliff_buffer_distance(
+            self,
+            center_projected=center_projected,
+            cliff_slope_threshold_deg=cliff_slope_threshold_deg,
+            max_search_radius_m=max_search_radius_m
+        )
+
+    def evaluate_site_terrain_safety(
+        self,
+        center_coord: Optional[Tuple[float, float]] = None,
+        center_lat: Optional[float] = None,
+        center_lon: Optional[float] = None,
+        center_x_m: Optional[float] = None,
+        center_y_m: Optional[float] = None,
+        landing_radius_m: float = 200.0,
+        max_acceptable_slope_deg: float = 15.0,
+        min_dem_coverage_percent: float = 75.0,
+        roughness_window_size: int = 5,
+        cliff_search_radius_m: float = 2000.0
+    ) -> Dict[str, Any]:
+        """GIS-to-MCDA Metrics Adapter: Evaluates landing footprint topographic safety."""
+        from app.services.geospatial.terrain_analysis import evaluate_site_terrain_safety
+        return evaluate_site_terrain_safety(
+            self,
+            center_coord=center_coord,
+            center_lat=center_lat,
+            center_lon=center_lon,
+            center_x_m=center_x_m,
+            center_y_m=center_y_m,
+            landing_radius_m=landing_radius_m,
+            max_acceptable_slope_deg=max_acceptable_slope_deg,
+            min_dem_coverage_percent=min_dem_coverage_percent,
+            roughness_window_size=roughness_window_size,
+            cliff_search_radius_m=cliff_search_radius_m
+        )
 
 
 class DemLoader:
