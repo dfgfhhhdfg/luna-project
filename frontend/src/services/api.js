@@ -47,6 +47,51 @@ export const getTerrainHorizon = async (params) => {
   return response.data;
 };
 
+export const getSolarObstruction = async (params) => {
+  const response = await apiClient.post('/terrain/solar-obstruction', params);
+  return response.data;
+};
+
+export const getEarthObstruction = async (params) => {
+  const response = await apiClient.post('/terrain/earth-obstruction', params);
+  return response.data;
+};
+
+export const getSurfaceViewshed = async (params) => {
+  const response = await apiClient.post('/terrain/viewshed', params);
+  return response.data;
+};
+
+export const getTerrainSample = async (latitude, longitude) => {
+  const response = await apiClient.get('/terrain/sample', { params: { latitude, longitude } });
+  return response.data;
+};
+
+export const getTerrainProfile = async (params) => {
+  const response = await apiClient.post('/terrain/profile', params);
+  return response.data;
+};
+
+export const assessLandingArea = async (params) => {
+  const response = await apiClient.post('/terrain/assess-landing-area', params);
+  return response.data;
+};
+
+export const sampleTerrainRay = async (params) => {
+  const response = await apiClient.post('/terrain/ray', params);
+  return response.data;
+};
+
+export const checkLineOfSight = async (params) => {
+  const response = await apiClient.post('/terrain/check-los', params);
+  return response.data;
+};
+
+export const getDemHorizonProfile = async (params) => {
+  const response = await apiClient.post('/terrain/dem-horizon', params);
+  return response.data;
+};
+
 // 4. Solar Illumination Engine
 export const calculateIllumination = async (params) => {
   const response = await apiClient.post('/illumination', params);

@@ -1,0 +1,58 @@
+{
+  "dataset_name": "NASA Lunar Reconnaissance Orbiter Lunar Orbiter Laser Altimeter (LOLA) GDR",
+  "data_provenance": "NASA Planetary Data System (PDS) Geosciences Node / NASA Goddard Space Flight Center",
+  "instrument_pi": "Dr. David E. Smith (MIT / NASA GSFC)",
+  "reference_sphere_radius_m": 1737400.0,
+  "elevation_datum": "Lunar Mean Earth Reference Sphere R=1737.4 km",
+  "elevation_units": "meters",
+  "coordinate_frame": "IAU Mean Earth / Polar Axis (ME) selenographic",
+  "map_projection": "Polar Stereographic (South Pole), Center Lat=-90°, Central Lon=0°, Std Parallel=-90°",
+  "supported_rasters": [
+    {
+      "product_id": "LDEM_875S_20M",
+      "resolution_m_per_pixel": 20.0,
+      "latitude_coverage": "87.5°S to 90.0°S",
+      "primary_use": "Landing site micro-slope & hazard avoidance"
+    },
+    {
+      "product_id": "LDEM_80S_100M",
+      "resolution_m_per_pixel": 100.0,
+      "latitude_coverage": "80.0°S to 90.0°S",
+      "primary_use": "Regional 360-degree terrain horizon ray-tracing & viewshed line-of-sight"
+    }
+  ],
+  "calibrated_benchmarks": [
+    {
+      "site_id": "shackleton-rim",
+      "name": "Shackleton Crater Rim",
+      "latitude": -89.78,
+      "longitude": 125.0,
+      "elevation_m": 1240.0,
+      "mean_slope_deg": 8.5
+    },
+    {
+      "site_id": "connecting-ridge",
+      "name": "Connecting Ridge",
+      "latitude": -89.44,
+      "longitude": 222.5,
+      "elevation_m": 820.0,
+      "mean_slope_deg": 6.2
+    },
+    {
+      "site_id": "malapert-mountain",
+      "name": "Malapert Mountain (Massif)",
+      "latitude": -85.99,
+      "longitude": 2.91,
+      "elevation_m": 5050.0,
+      "mean_slope_deg": 7.0
+    },
+    {
+      "site_id": "de-gerlache-rim-1",
+      "name": "de Gerlache Rim 1",
+      "latitude": -88.52,
+      "longitude": 271.4,
+      "elevation_m": 610.0,
+      "mean_slope_deg": 5.4
+    }
+  ]
+}

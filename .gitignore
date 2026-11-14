@@ -55,6 +55,7 @@ Thumbs.db
 
 # Large GIS / Planetary Datasets (keep sample data in datasets/sample)
 datasets/dem/*.tif
+!datasets/dem/synthetic_test_dem.tif
 datasets/dem/*.img
 datasets/dem/*.grd
 datasets/dem/*.JP2
